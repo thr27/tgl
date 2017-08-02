@@ -261,7 +261,74 @@ static void conn_try_write (evutil_socket_t fd, short what, void *arg) {
     event_add (c->write_ev, 0);
   }
 }
-  
+static int establish_proxy_connection(struct connection *c, int fd, const char *host, int port)
+{
+	char buffer[1024];
+	char *cp;
+	int isdigit(int c);
+	struct tgl_state *TLS = c->TLS;
+	
+	snprintf(buffer, sizeof(buffer), "CONNECT %s:%d HTTP/1.0\r\n\r\n", host, port);
+	if (write(fd, buffer, strlen(buffer)) != (int) strlen(buffer)) {
+		
+		vlogprintf ( E_ERROR, "failed to write to proxy: %s (%s)\n",
+			strerror(errno), buffer);
+		return -1;
+	}
+
+	for (cp = buffer; cp < &buffer[sizeof(buffer) - 1]; cp++) {
+		if (read(fd, cp, 1) != 1) {
+			vlogprintf ( E_ERROR, "failed to read from proxy: %s\n",
+				strerror(errno));
+			return -1;
+		}
+		if (*cp == '\n')
+			break;
+	}
+
+	if (*cp != '\n')
+		cp++;
+	*cp-- = '\0';
+	vlogprintf ( E_DEBUG, "PROXY RESP: %s\n", cp);
+	
+	if (*cp == '\r')
+		*cp = '\0';
+	if (strncmp(buffer, "HTTP/", 5) != 0) {
+		vlogprintf ( E_ERROR, "bad response from proxy - %s\n",
+			buffer);
+		return -1;
+	}
+	for (cp = &buffer[5]; isdigit(* (unsigned char *) cp) || (*cp == '.'); cp++)
+		;
+	while (*cp == ' ')
+		cp++;
+	if (*cp != '2') {
+		vlogprintf ( E_ERROR, "bad response from proxy - %s\n",
+			buffer);
+		return -1;
+	}
+	/* throw away the rest of the HTTP header */
+	while (1) {
+		for (cp = buffer; cp < &buffer[sizeof(buffer) - 1];
+		     cp++) {
+			if (read(fd, cp, 1) != 1) {
+				vlogprintf ( E_ERROR, "failed to read from proxy: %s\n",
+					strerror(errno));
+				return -1;
+			}
+			
+			if (*cp == '\n')
+				break;
+		}
+		vlogprintf ( E_DEBUG, "PROXY RESP: %s\n", buffer);
+		
+		if ((cp > buffer) && (*cp == '\n'))
+			cp--;
+		if ((cp == buffer) && ((*cp == '\n') || (*cp == '\r')))
+			break;
+	}
+	return 0;
+}  
 static int my_connect (struct connection *c, const char *host) {
   struct tgl_state *TLS = c->TLS;
   int v6 = TLS->ipv6_enabled;
@@ -301,15 +368,46 @@ static int my_connect (struct connection *c, const char *host) {
       return -1;
     }
   }
-
+#ifdef SKIP_THR27_PROXY    
   fcntl (fd, F_SETFL, O_NONBLOCK);
-
   if (connect (fd, (struct sockaddr *) (v6 ? (void *)&addr6 : (void *)&addr), v6 ? sizeof (addr6) : sizeof (addr)) == -1) {
     if (errno != EINPROGRESS) {
       close (fd);
       return -1;
     }
   }
+#else
+/* USE PROXY */
+	{
+
+	const char* proxy_host = "10.83.40.21";	
+	int proxy_port = 80;
+
+	  addr.sin_port = htons (proxy_port);
+	  addr.sin_addr.s_addr = inet_addr (proxy_host);
+	
+	  // fcntl (fd, F_SETFL, O_NONBLOCK);
+	
+	  if (connect (fd, (struct sockaddr *) &addr, sizeof (addr)) == -1) {
+	    if (errno != EINPROGRESS) {
+	      vlogprintf ( E_ERROR, "Can not connect to PROXY %s:%d %m\n", proxy_host, proxy_port);
+	      close (fd);
+	      tfree (c, sizeof (*c));
+	      exit(-1);
+	      return 0;
+	    }
+	  }
+	  if(establish_proxy_connection(c, fd, host, c->port) == -1) {
+	      vlogprintf ( E_ERROR, "Can not connect to Server via PROXY %s:%d %m\n", host, c->port);
+	      close (fd);
+	      tfree (c, sizeof (*c));
+	      return 0;
+		  
+		}
+		fcntl (fd, F_SETFL, O_NONBLOCK);
+	}		
+/* END USE PROXY */
+#endif  
   return fd;
 }
 

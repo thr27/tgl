@@ -4,11 +4,27 @@
 #include <assert.h>
 #include <stdlib.h>
 
+#ifndef BEV_EVENT_READ
 #define BEV_EVENT_READ EVBUFFER_READ
+#endif
+
+#ifndef BEV_EVENT_WRITE
 #define BEV_EVENT_WRITE EVBUFFER_WRITE
+#endif
+
+#ifndef BEV_EVENT_EOF
 #define BEV_EVENT_EOF EVBUFFER_EOF
+#endif
+
+#ifndef BEV_EVENT_ERROR
 #define BEV_EVENT_ERROR EVBUFFER_ERROR
+#endif
+
+#ifndef BEV_EVENT_TIMEOUT
 #define BEV_EVENT_TIMEOUT EVBUFFER_TIMEOUT
+#endif
+
+#ifndef _EVENT2_EVENT_H_
 
 typedef int evutil_socket_t;
   
@@ -44,5 +60,7 @@ static struct bufferevent *bufferevent_socket_new (struct event_base *base, int 
 
 static inline void *event_get_callback_arg(const struct event *ev) {
   return ev->ev_arg;
+
 }
+#endif
 #endif
